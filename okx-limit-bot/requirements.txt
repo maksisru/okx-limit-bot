@@ -1,3 +1,3 @@
 flask
 python-dotenv
-okx-python-sdk-api
+git+https://github.com/okx/okx-openapi-python-sdk.git

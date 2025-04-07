@@ -67,6 +67,10 @@ def webhook():
     tp_price = data.get("take_profit")
     quantity = data.get("sz", "1")
     leverage = data.get("leverage", "10")
+    side = data.get("side", "buy")
+    pos_side = data.get("posSide", "long")
+
+    print("📩 Webhook received:", data)
 
     # Установка плеча
     send_okx_request("POST", "/api/v5/account/set-leverage", {
@@ -88,8 +92,8 @@ def webhook():
     order_payload = {
         "instId": symbol,
         "tdMode": "isolated",
-        "side": "buy",
-        "posSide": "long",
+        "side": side,
+        "posSide": pos_side,
         "ordType": "limit",
         "px": price,
         "sz": quantity,
@@ -97,7 +101,10 @@ def webhook():
         "tpOrdPx": tp_price
     }
 
+    print("📦 Order payload:", order_payload)
+
     result = send_okx_request("POST", "/api/v5/trade/order", order_payload)
+    print("🧾 OKX Response:", result)
 
     try:
         order_id = result["data"][0]["ordId"]
@@ -105,6 +112,7 @@ def webhook():
         return jsonify({"status": "order placed", "order_id": order_id})
     except Exception as e:
         return jsonify({"error": str(e), "response": result}), 400
+
 
 @app.route("/")
 def index():

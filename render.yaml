@@ -3,7 +3,7 @@ services:
     name: okx-limit-bot
     env: python
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "gunicorn okx-limit-bot.app:app"
+    startCommand: "gunicorn app:app"
     envVars:
       - key: OKX_API_KEY
         sync: false

@@ -1,21 +1,41 @@
 import os
+import time
 import json
+import base64
+import hmac
+import hashlib
+import requests
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
-from okx.v5 import Trade
 
 load_dotenv()
 app = Flask(__name__)
 
-tradeAPI = Trade(
-    api_key=os.getenv("OKX_API_KEY"),
-    api_secret_key=os.getenv("OKX_API_SECRET"),
-    passphrase=os.getenv("OKX_PASSPHRASE"),
-    use_server_time=True,
-    flag='1'  # '1' — реальный счёт, '0' — демо
-)
+API_KEY = os.getenv("OKX_API_KEY")
+API_SECRET = os.getenv("OKX_API_SECRET")
+PASSPHRASE = os.getenv("OKX_PASSPHRASE")
+BASE_URL = "https://www.okx.com"
 
 ORDER_FILE = "current_order.json"
+
+def generate_signature(timestamp, method, request_path, body=""):
+    message = f"{timestamp}{method.upper()}{request_path}{body}"
+    mac = hmac.new(API_SECRET.encode(), message.encode(), hashlib.sha256)
+    return base64.b64encode(mac.digest()).decode()
+
+def send_okx_request(method, endpoint, payload=None):
+    timestamp = str(time.time())
+    body = json.dumps(payload) if payload else ""
+    headers = {
+        "OK-ACCESS-KEY": API_KEY,
+        "OK-ACCESS-SIGN": generate_signature(timestamp, method, endpoint, body),
+        "OK-ACCESS-TIMESTAMP": timestamp,
+        "OK-ACCESS-PASSPHRASE": PASSPHRASE,
+        "Content-Type": "application/json"
+    }
+    url = BASE_URL + endpoint
+    response = requests.request(method, url, headers=headers, data=body)
+    return response.json()
 
 def save_order(order_id):
     with open(ORDER_FILE, "w") as f:
@@ -31,10 +51,6 @@ def clear_order():
     if os.path.exists(ORDER_FILE):
         os.remove(ORDER_FILE)
 
-@app.route("/", methods=["GET"])
-def home():
-    return "OKX Bot is running!"
-
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
@@ -48,31 +64,45 @@ def webhook():
     quantity = data.get("quantity", "0.01")
     leverage = data.get("leverage", "20")
 
-    tradeAPI.set_leverage(instId=symbol, lever=leverage, mgnMode="isolated")
+    # Установка плеча
+    send_okx_request("POST", "/api/v5/account/set-leverage", {
+        "instId": symbol,
+        "lever": leverage,
+        "mgnMode": "isolated"
+    })
 
+    # Отмена предыдущего ордера
     prev_order = load_order()
     if prev_order:
-        try:
-            tradeAPI.cancel_order(instId=symbol, ordId=prev_order)
-        except Exception as e:
-            print(f"Ошибка при отмене ордера: {e}")
+        send_okx_request("POST", "/api/v5/trade/cancel-order", {
+            "instId": symbol,
+            "ordId": prev_order
+        })
         clear_order()
 
-    order = tradeAPI.place_order(
-        instId=symbol,
-        tdMode="isolated",
-        side="buy",
-        posSide="long",
-        ordType="limit",
-        orderPx=price,
-        sz=quantity,
-        tpTriggerPx=tp_price,
-        tpOrdPx=tp_price
-    )
+    # Создание нового лимитного ордера с TP
+    result = send_okx_request("POST", "/api/v5/trade/order", {
+        "instId": symbol,
+        "tdMode": "isolated",
+        "side": "buy",
+        "posSide": "long",
+        "ordType": "limit",
+        "px": price,
+        "sz": quantity,
+        "tpTriggerPx": tp_price,
+        "tpOrdPx": tp_price
+    })
 
-    order_id = order['data'][0]['ordId']
-    save_order(order_id)
-    return jsonify({"status": "order placed", "order_id": order_id})
+    try:
+        order_id = result["data"][0]["ordId"]
+        save_order(order_id)
+        return jsonify({"status": "order placed", "order_id": order_id})
+    except Exception as e:
+        return jsonify({"error": str(e), "response": result}), 400
+
+@app.route("/")
+def index():
+    return "OKX bot running!"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(port=5000)

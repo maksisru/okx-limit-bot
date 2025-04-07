@@ -1,5 +1,6 @@
 import os
 import time
+from datetime import datetime, timezone
 import json
 import base64
 import hmac
@@ -22,10 +23,14 @@ def generate_signature(timestamp, method, request_path, body=""):
     message = f"{timestamp}{method.upper()}{request_path}{body}"
     mac = hmac.new(API_SECRET.encode(), message.encode(), hashlib.sha256)
     return base64.b64encode(mac.digest()).decode()
+    
+def get_iso_timestamp():
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 def send_okx_request(method, endpoint, payload=None):
-    timestamp = str(time.time())
+    timestamp = get_iso_timestamp()
     body = json.dumps(payload) if payload else ""
+
     headers = {
         "OK-ACCESS-KEY": API_KEY,
         "OK-ACCESS-SIGN": generate_signature(timestamp, method, endpoint, body),
@@ -33,9 +38,23 @@ def send_okx_request(method, endpoint, payload=None):
         "OK-ACCESS-PASSPHRASE": PASSPHRASE,
         "Content-Type": "application/json"
     }
+
     url = BASE_URL + endpoint
-    response = requests.request(method, url, headers=headers, data=body)
-    return response.json()
+
+    # 🐞 Отладочные логи
+    print(f"\n🌐 Sending {method} request to {url}")
+    print("🕒 Timestamp:", timestamp)
+    print("📦 Payload:", body)
+    print("🧾 Headers:", json.dumps(headers, indent=2))
+
+    try:
+        response = requests.request(method, url, headers=headers, data=body)
+        print("📨 Raw Response Text:", response.text)
+        return response.json()
+    except Exception as e:
+        print("🚨 Request failed:", str(e))
+        return {"error": str(e)}
+
 
 def save_order(order_id):
     with open(ORDER_FILE, "w") as f:

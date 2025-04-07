@@ -55,13 +55,65 @@ def clear_order():
 def webhook():
     data = request.json
 
-    # 🐞 Добавим отладочную печать:
+    # 🐞 Отладка входящих данных
     print("📩 Received payload:", data)
     print("🔐 Received secret:", data.get("secret"))
     print("🔐 Expected secret:", os.getenv("WEBHOOK_SECRET"))
 
     if data.get("secret") != os.getenv("WEBHOOK_SECRET"):
         return jsonify({"error": "Invalid secret"}), 403
+
+    symbol = data["symbol"]
+    price = data["limit_price"]
+    tp_price = data["take_profit"]
+    quantity = data.get("quantity", "0.01")
+    leverage = data.get("leverage", "20")
+
+    # 🐞 Отладка параметров
+    print(f"⚙️ Params — symbol: {symbol}, price: {price}, TP: {tp_price}, qty: {quantity}, lev: {leverage}")
+
+    # Установка плеча
+    leverage_result = send_okx_request("POST", "/api/v5/account/set-leverage", {
+        "instId": symbol,
+        "lever": leverage,
+        "mgnMode": "isolated"
+    })
+    print("📶 Leverage response:", leverage_result)
+
+    # Отмена предыдущего ордера
+    prev_order = load_order()
+    if prev_order:
+        cancel_result = send_okx_request("POST", "/api/v5/trade/cancel-order", {
+            "instId": symbol,
+            "ordId": prev_order
+        })
+        print("❌ Cancel previous order response:", cancel_result)
+        clear_order()
+
+    # Создание нового лимитного ордера с TP
+    order_payload = {
+        "instId": symbol,
+        "tdMode": "isolated",
+        "side": "buy",
+        "posSide": "long",
+        "ordType": "limit",
+        "px": price,
+        "sz": quantity,
+        "tpTriggerPx": tp_price,
+        "tpOrdPx": tp_price
+    }
+    print("📦 Sending order payload:", order_payload)
+    result = send_okx_request("POST", "/api/v5/trade/order", order_payload)
+    print("📨 Order response from OKX:", result)
+
+    try:
+        order_id = result["data"][0]["ordId"]
+        save_order(order_id)
+        return jsonify({"status": "order placed", "order_id": order_id})
+    except Exception as e:
+        print("❗ Exception during order handling:", str(e))
+        return jsonify({"error": str(e), "response": result}), 400
+
 
     symbol = data["symbol"]
     price = data["limit_price"]

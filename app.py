@@ -8,7 +8,7 @@ import requests
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv("/etc/secrets/.env.example")
 app = Flask(__name__)
 
 API_KEY = os.getenv("OKX_API_KEY")

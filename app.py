@@ -55,6 +55,11 @@ def clear_order():
 def webhook():
     data = request.json
 
+    # 🐞 Добавим отладочную печать:
+    print("📩 Received payload:", data)
+    print("🔐 Received secret:", data.get("secret"))
+    print("🔐 Expected secret:", os.getenv("WEBHOOK_SECRET"))
+
     if data.get("secret") != os.getenv("WEBHOOK_SECRET"):
         return jsonify({"error": "Invalid secret"}), 403
 

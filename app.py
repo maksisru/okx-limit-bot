@@ -1,11 +1,10 @@
 import os
-import time
-from datetime import datetime, timezone
 import json
 import base64
 import hmac
 import hashlib
 import requests
+from datetime import datetime, timezone
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 
@@ -30,7 +29,6 @@ def get_iso_timestamp():
 def send_okx_request(method, endpoint, payload=None):
     timestamp = get_iso_timestamp()
     body = json.dumps(payload) if payload else ""
-
     headers = {
         "OK-ACCESS-KEY": API_KEY,
         "OK-ACCESS-SIGN": generate_signature(timestamp, method, endpoint, body),
@@ -38,19 +36,10 @@ def send_okx_request(method, endpoint, payload=None):
         "OK-ACCESS-PASSPHRASE": PASSPHRASE,
         "Content-Type": "application/json"
     }
-
-    url = BASE_URL + endpoint
-    print(f"\n🌐 Sending {method} request to {url}")
-    print("🕒 Timestamp:", timestamp)
-    print("📦 Payload:", body)
-    print("🧾 Headers:", json.dumps(headers, indent=2))
-
     try:
-        response = requests.request(method, url, headers=headers, data=body)
-        print("📨 Raw Response Text:", response.text)
+        response = requests.request(method, BASE_URL + endpoint, headers=headers, data=body)
         return response.json()
     except Exception as e:
-        print("🚨 Request failed:", str(e))
         return {"error": str(e)}
 
 def save_order(order_id):
@@ -70,38 +59,32 @@ def clear_order():
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
-    print("📩 Received payload:", data)
-
     if data.get("secret") != WEBHOOK_SECRET:
         return jsonify({"error": "Invalid secret"}), 403
 
-    symbol = data["symbol"]
-    price = data["limit_price"]
-    tp_price = data["take_profit"]
-    quantity = data.get("quantity", "0.01")
-    leverage = data.get("leverage", "20")
-
-    print(f"⚙️ Params — symbol: {symbol}, price: {price}, TP: {tp_price}, qty: {quantity}, lev: {leverage}")
+    symbol = data.get("symbol")
+    price = data.get("limit_price")
+    tp_price = data.get("take_profit")
+    quantity = data.get("sz", "1")
+    leverage = data.get("leverage", "10")
 
     # Установка плеча
-    leverage_result = send_okx_request("POST", "/api/v5/account/set-leverage", {
+    send_okx_request("POST", "/api/v5/account/set-leverage", {
         "instId": symbol,
         "lever": leverage,
         "mgnMode": "isolated"
     })
-    print("📶 Leverage response:", leverage_result)
 
     # Отмена предыдущего ордера
     prev_order = load_order()
     if prev_order:
-        cancel_result = send_okx_request("POST", "/api/v5/trade/cancel-order", {
+        send_okx_request("POST", "/api/v5/trade/cancel-order", {
             "instId": symbol,
             "ordId": prev_order
         })
-        print("❌ Cancel previous order response:", cancel_result)
         clear_order()
 
-    # Новый ордер
+    # Создание нового ордера
     order_payload = {
         "instId": symbol,
         "tdMode": "isolated",
@@ -113,10 +96,20 @@ def webhook():
         "tpTriggerPx": tp_price,
         "tpOrdPx": tp_price
     }
-    print("📦 Sending order payload:", order_payload)
 
     result = send_okx_request("POST", "/api/v5/trade/order", order_payload)
-    print("📨 Order response from OKX:", result)
 
     try:
-        order_id = result["data"][_
+        order_id = result["data"][0]["ordId"]
+        save_order(order_id)
+        return jsonify({"status": "order placed", "order_id": order_id})
+    except Exception as e:
+        return jsonify({"error": str(e), "response": result}), 400
+
+@app.route("/")
+def index():
+    return "✅ OKX limit bot is running."
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
